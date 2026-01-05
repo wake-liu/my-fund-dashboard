@@ -133,19 +133,24 @@ def analyze_trend(df):
         'data_df': df 
     }
 
-# ================= 3. 数据处理 =================
+# ================= 3. 数据处理 (已加入去重逻辑) =================
 
 all_recommendations = []
 portfolio_display_list = [] 
+held_set = set() # 新增：用于存储已持有的代码，防止雷达重复推荐
 
 df_holdings = st.session_state['my_holdings']
 total_principal = 0
 total_market_value = 0
 today_pnl = 0
 
-# 1. 分析持仓
+# 1. 分析持仓 (先处理持仓，并记录代码)
 for index, row in df_holdings.iterrows():
     if row['principal'] >= 0:
+        # 记录已持有的代码 (去掉 sh/sz 前缀，只留数字，方便对比)
+        clean_code = row['code'].replace("sh", "").replace("sz", "")
+        held_set.add(clean_code)
+
         data = get_data(row['code'], row.get('type', 'ETF'))
         if data is not None:
             res = analyze_trend(data)
@@ -187,16 +192,24 @@ for index, row in df_holdings.iterrows():
                 'action': res['action_type'], 'score': final_score, 'is_holding': True, 'pct': res['pct']
             })
 
-# 2. 分析雷达 (显示具体ETF代码)
+# 2. 分析雷达 (显示具体ETF代码 + 去重)
 for cat, items in MARKET_SCANNER.items():
     for item in items:
+        # --- 新增去重逻辑 ---
+        # 提取雷达配置中的ETF代码数字部分
+        clean_etf = item['etf'].split(" ")[0].replace("sh", "").replace("sz", "")
+        # 如果这个代码已经在我的持仓里了，跳过，不再重复推荐
+        if clean_etf in held_set:
+            continue
+        # ------------------
+
         data = get_data(item['code'])
         if data is not None:
             res = analyze_trend(data)
             if res['score'] >= 80:
                 all_recommendations.append({
                     'name': item['name'], 
-                    'code': item['etf'], # 推荐时显示ETF代码
+                    'code': item['etf'], 
                     'signal': res['signal'],
                     'action': res['action_type'], 
                     'score': res['score'], 
@@ -321,4 +334,5 @@ for i, (cat, items) in enumerate(MARKET_SCANNER.items()):
                     else:
                         st.caption(res['signal'])
                     
+
                     st.line_chart(data.tail(10)['close'], height=20)
